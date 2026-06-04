@@ -9,7 +9,7 @@ st.set_page_config(page_title="개발 진행 현황", layout="wide")
 
 @st.cache_data
 def load_data():
-    file_path = r"C:\jiyong\development_requests.csv"
+    file_path = os.path.join(os.path.dirname(__file__), "development_requests.csv")
     df = pd.read_csv(file_path, encoding='utf-8-sig')
 
     date_columns = ['요청일시', '요청접수일시', '개발시작일시', '개발완료목표일자']
