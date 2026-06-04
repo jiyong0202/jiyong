@@ -4,35 +4,77 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
+from supabase import create_client, Client
 
 st.set_page_config(page_title="개발 진행 현황", layout="wide")
 
-@st.cache_data
+@st.cache_resource
+def init_supabase():
+    supabase_url = st.secrets.get("supabase_url")
+    supabase_key = st.secrets.get("supabase_key")
+
+    if not supabase_url or not supabase_key:
+        st.error("Supabase 설정이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
+        st.stop()
+
+    return create_client(supabase_url, supabase_key)
+
+@st.cache_data(ttl=300)
 def load_data():
-    file_path = os.path.join(os.path.dirname(__file__), "development_requests.csv")
-    df = pd.read_csv(file_path, encoding='utf-8-sig')
+    try:
+        supabase: Client = init_supabase()
 
-    date_columns = ['요청일시', '요청접수일시', '개발시작일시', '개발완료목표일자']
-    for col in date_columns:
-        df[col] = pd.to_datetime(df[col], errors='coerce')
+        response = supabase.table("development_requests").select("*").execute()
+        data = response.data
 
-    today = pd.Timestamp(datetime.now().date())
-    df['남은일수'] = (df['개발완료목표일자'] - today).dt.days
+        if not data:
+            st.error("Supabase에서 데이터를 가져올 수 없습니다.")
+            return pd.DataFrame()
 
-    df['진행률'] = 0.0
-    mask_in_progress = df['진행상태'] == '진행중'
-    mask_has_start = df['개발시작일시'].notna()
+        df = pd.DataFrame(data)
 
-    valid_mask = mask_in_progress & mask_has_start
-    if valid_mask.any():
-        start_dates = df.loc[valid_mask, '개발시작일시']
-        end_dates = df.loc[valid_mask, '개발완료목표일자']
-        total_days = (end_dates - start_dates).dt.days
-        elapsed_days = (today - start_dates).dt.days
-        progress = (elapsed_days / total_days.clip(lower=1) * 100).clip(0, 100)
-        df.loc[valid_mask, '진행률'] = progress.values
+        date_columns = ['request_datetime', 'request_received_datetime', 'development_start_datetime', 'development_completion_target_date']
 
-    return df
+        for col in date_columns:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+
+        df.rename(columns={
+            'request_number': '요청번호',
+            'request_datetime': '요청일시',
+            'request_department': '요청부서',
+            'requester': '요청자',
+            'request_received_datetime': '요청접수일시',
+            'development_start_datetime': '개발시작일시',
+            'development_completion_target_date': '개발완료목표일자',
+            'development_manager': '개발담당자',
+            'it_biz_manager': 'IT비즈담당자',
+            'task_title': '일감제목',
+            'request_content': '요청내용',
+            'progress_status': '진행상태'
+        }, inplace=True)
+
+        today = pd.Timestamp(datetime.now().date())
+        df['남은일수'] = (df['개발완료목표일자'] - today).dt.days
+
+        df['진행률'] = 0.0
+        mask_in_progress = df['진행상태'] == '진행중'
+        mask_has_start = df['개발시작일시'].notna()
+
+        valid_mask = mask_in_progress & mask_has_start
+        if valid_mask.any():
+            start_dates = df.loc[valid_mask, '개발시작일시']
+            end_dates = df.loc[valid_mask, '개발완료목표일자']
+            total_days = (end_dates - start_dates).dt.days
+            elapsed_days = (today - start_dates).dt.days
+            progress = (elapsed_days / total_days.clip(lower=1) * 100).clip(0, 100)
+            df.loc[valid_mask, '진행률'] = progress.values
+
+        return df
+
+    except Exception as e:
+        st.error(f"데이터 로드 중 오류가 발생했습니다: {str(e)}")
+        return pd.DataFrame()
 
 def get_status_color(status):
     colors = {
