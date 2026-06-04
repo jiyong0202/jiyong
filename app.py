@@ -4,31 +4,34 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
-from supabase import create_client, Client
+import httpx
 
 st.set_page_config(page_title="개발 진행 현황", layout="wide")
-
-@st.cache_resource
-def init_supabase():
-    supabase_url = st.secrets.get("supabase_url")
-    supabase_key = st.secrets.get("supabase_key")
-
-    if not supabase_url or not supabase_key:
-        st.error("Supabase 설정이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
-        st.stop()
-
-    return create_client(supabase_url, supabase_key)
 
 @st.cache_data(ttl=300)
 def load_data():
     try:
-        supabase: Client = init_supabase()
+        supabase_url = st.secrets.get("supabase_url")
+        supabase_key = st.secrets.get("supabase_key")
 
-        response = supabase.table("development_requests").select("*").execute()
-        data = response.data
+        if not supabase_url or not supabase_key:
+            st.error("Supabase 설정이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
+            return pd.DataFrame()
+
+        url = f"{supabase_url}/rest/v1/development_requests?select=*"
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json"
+        }
+
+        with httpx.Client() as client:
+            response = client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
 
         if not data:
-            st.error("Supabase에서 데이터를 가져올 수 없습니다.")
+            st.warning("Supabase에 데이터가 없습니다.")
             return pd.DataFrame()
 
         df = pd.DataFrame(data)
