@@ -15,7 +15,7 @@ def load_data():
         supabase_key = st.secrets.get("supabase_key")
 
         if not supabase_url or not supabase_key:
-            st.error("Supabase 설정이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
+            st.error("⚠️ Supabase 설정이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
             return pd.DataFrame()
 
         url = f"{supabase_url}/rest/v1/development_requests?select=*"
@@ -31,7 +31,7 @@ def load_data():
             data = response.json()
 
         if not data:
-            st.warning("Supabase에 데이터가 없습니다.")
+            st.warning("⚠️ Supabase의 development_requests 테이블에 데이터가 없습니다.")
             return pd.DataFrame()
 
         df = pd.DataFrame(data)
@@ -42,7 +42,7 @@ def load_data():
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
 
-        df.rename(columns={
+        column_mapping = {
             'request_number': '요청번호',
             'request_datetime': '요청일시',
             'request_department': '요청부서',
@@ -55,28 +55,35 @@ def load_data():
             'task_title': '일감제목',
             'request_content': '요청내용',
             'progress_status': '진행상태'
-        }, inplace=True)
+        }
 
-        today = pd.Timestamp(datetime.now().date())
-        df['남은일수'] = (df['개발완료목표일자'] - today).dt.days
+        existing_cols = {k: v for k, v in column_mapping.items() if k in df.columns}
+        df.rename(columns=existing_cols, inplace=True)
 
-        df['진행률'] = 0.0
-        mask_in_progress = df['진행상태'] == '진행중'
-        mask_has_start = df['개발시작일시'].notna()
+        if '개발완료목표일자' in df.columns:
+            today = pd.Timestamp(datetime.now().date())
+            df['남은일수'] = (df['개발완료목표일자'] - today).dt.days
 
-        valid_mask = mask_in_progress & mask_has_start
-        if valid_mask.any():
-            start_dates = df.loc[valid_mask, '개발시작일시']
-            end_dates = df.loc[valid_mask, '개발완료목표일자']
-            total_days = (end_dates - start_dates).dt.days
-            elapsed_days = (today - start_dates).dt.days
-            progress = (elapsed_days / total_days.clip(lower=1) * 100).clip(0, 100)
-            df.loc[valid_mask, '진행률'] = progress.values
+            df['진행률'] = 0.0
+            if '진행상태' in df.columns and '개발시작일시' in df.columns:
+                mask_in_progress = df['진행상태'] == '진행중'
+                mask_has_start = df['개발시작일시'].notna()
+
+                valid_mask = mask_in_progress & mask_has_start
+                if valid_mask.any():
+                    start_dates = df.loc[valid_mask, '개발시작일시']
+                    end_dates = df.loc[valid_mask, '개발완료목표일자']
+                    total_days = (end_dates - start_dates).dt.days
+                    elapsed_days = (today - start_dates).dt.days
+                    progress = (elapsed_days / total_days.clip(lower=1) * 100).clip(0, 100)
+                    df.loc[valid_mask, '진행률'] = progress.values
 
         return df
 
     except Exception as e:
-        st.error(f"데이터 로드 중 오류가 발생했습니다: {str(e)}")
+        import traceback
+        st.error(f"❌ 데이터 로드 중 오류: {str(e)}")
+        st.error(f"Traceback:\n{traceback.format_exc()}")
         return pd.DataFrame()
 
 def get_status_color(status):
